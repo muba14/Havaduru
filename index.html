@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="HavaDuru: canlı hava durumu, sıcaklık grafiği, gün doğumu/batımı ve ay evresi. Open-Meteo verisiyle çalışır.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='5' fill='%23E08A0B'/%3E%3Cg stroke='%23E08A0B' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2'/%3E%3C/g%3E%3C/svg%3E">
+<style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>HavaDuru</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+/* Yerleşim: üstte ülke/şehir çubuğu → solda büyük derece, sağa doğru koyulaşan canlı gökyüzü sahnesi → ölçüm şeridi → sıcaklık grafiği → güneş | ay */
+:root{
+  --bg:#EDF1F6; --surface:#FFFFFF; --surface-2:#F4F7FB; --line:#DCE3EC;
+  --fg:#101B2D; --muted:#5C6B80; --accent:#2466E0; --accent-soft:#DCE8FF;
+  --sun:#E08A0B; --good:#1F9D62; --warn:#C98A04; --bad:#D4492F;
+  --shadow:0 1px 2px rgba(16,27,45,.05),0 12px 32px -18px rgba(16,27,45,.25);
+  --display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --body:"Instrument Sans","Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0A111E; --surface:#111B2D; --surface-2:#172338; --line:#24324A;
+  --fg:#E8EEF7; --muted:#93A2B8; --accent:#6EA2FF; --accent-soft:#1B2D4F;
+  --sun:#F5B041; --good:#4CC38A; --warn:#E3B341; --bad:#F0705A;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 16px 36px -20px rgba(0,0,0,.7); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0A111E; --surface:#111B2D; --surface-2:#172338; --line:#24324A;
+  --fg:#E8EEF7; --muted:#93A2B8; --accent:#6EA2FF; --accent-soft:#1B2D4F;
+  --sun:#F5B041; --good:#4CC38A; --warn:#E3B341; --bad:#F0705A;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 16px 36px -20px rgba(0,0,0,.7); color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.45;margin:0}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:20px;padding-block:18px 40px;display:flex;flex-direction:column;gap:16px}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+/* üst çubuk */
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.brand{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.02em;display:flex;align-items:center;gap:8px;margin-right:auto}
+.brand svg{color:var(--sun)}
+.pick{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.field{position:relative;display:flex;align-items:center}
+.field>svg{position:absolute;left:11px;color:var(--muted);pointer-events:none}
+.field select,.field input{background:var(--surface);border:1px solid var(--line);border-radius:999px;height:40px;padding:0 14px 0 34px;min-width:0}
+.field select{appearance:none;padding-right:30px;cursor:pointer;max-width:190px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 16px) 17px,calc(100% - 11px) 17px;background-size:5px 5px;background-repeat:no-repeat}
+.field input{width:190px}
+.field input::placeholder{color:var(--muted)}
+.results{position:absolute;top:46px;left:0;right:0;min-width:240px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:6px;z-index:20;display:flex;flex-direction:column}
+.results button{background:none;border:0;text-align:left;padding:8px 10px;border-radius:9px;cursor:pointer}
+.results button:hover,.results button:focus-visible{background:var(--surface-2)}
+.results small{color:var(--muted);display:block}
+.results .none{padding:8px 10px;color:var(--muted)}
+
+.note{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;background:var(--accent-soft);border-radius:14px;padding:10px 14px;font-size:13.5px}
+.note b{font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.chip{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px 11px;cursor:pointer;font-size:13px}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+
+/* aktivite önerisi */
+.act{display:flex;align-items:center;gap:16px;background:var(--surface);border-radius:22px;box-shadow:var(--shadow);padding:16px 20px;min-width:0}
+.act-ic{flex:none;width:52px;height:52px;border-radius:16px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center}
+.act-ic svg{width:26px;height:26px}
+.act-b{min-width:0;flex:1}
+.act-l{font-size:12px;letter-spacing:.07em;text-transform:uppercase;font-weight:600;color:var(--muted)}
+.act-t{font-family:var(--display);font-weight:600;font-size:clamp(19px,2.4vw,24px);letter-spacing:-.015em;line-height:1.2;margin-top:2px;text-wrap:balance}
+.act-s{color:var(--muted);font-size:14.5px;margin-top:3px}
+
+/* kahraman alan */
+.hero{position:relative;overflow:hidden;border-radius:28px;background:var(--surface);box-shadow:var(--shadow);min-height:330px;display:flex}
+.hero canvas{position:absolute;inset:0;width:100%;height:100%;
+  -webkit-mask-image:linear-gradient(to right,transparent 0%,rgba(0,0,0,.06) 26%,rgba(0,0,0,.45) 52%,rgba(0,0,0,.85) 76%,#000 100%);
+          mask-image:linear-gradient(to right,transparent 0%,rgba(0,0,0,.06) 26%,rgba(0,0,0,.45) 52%,rgba(0,0,0,.85) 76%,#000 100%)}
+.hero-txt{position:relative;padding:28px 32px;display:flex;flex-direction:column;justify-content:space-between;gap:18px;min-width:0;max-width:62%}
+.place{font-family:var(--display);font-weight:600;font-size:22px;letter-spacing:-.01em;display:flex;align-items:center;gap:7px}
+.place svg{color:var(--accent);flex:none}
+.when{color:var(--muted);font-size:14px;margin-top:2px}
+.temp-row{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.temp{font-family:var(--display);font-weight:700;font-size:clamp(96px,17vw,172px);line-height:.86;letter-spacing:-.055em}
+.temp sup{font-size:.34em;font-weight:600;letter-spacing:0;vertical-align:top;position:relative;top:.18em;margin-left:.06em;color:var(--muted)}
+.cond{padding-top:12px;display:flex;flex-direction:column;gap:4px}
+.cond strong{font-family:var(--display);font-weight:600;font-size:clamp(20px,2.6vw,28px);letter-spacing:-.015em;line-height:1.1}
+.cond span{color:var(--muted);font-size:14.5px}
+.hilo{display:flex;gap:16px;flex-wrap:wrap;font-size:14.5px;color:var(--muted)}
+.hilo b{color:var(--fg);font-weight:600}
+.hilo span{display:inline-flex;align-items:center;gap:5px}
+
+/* ölçümler */
+.metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--line);border-radius:22px;overflow:hidden;box-shadow:var(--shadow)}
+.m{background:var(--surface);padding:16px 16px 15px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.m-l{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;letter-spacing:.07em;text-transform:uppercase;font-weight:600}
+.m-l svg{flex:none;color:var(--accent)}
+.m-v{font-family:var(--display);font-weight:600;font-size:27px;letter-spacing:-.02em;line-height:1.1;display:flex;align-items:baseline;gap:5px;flex-wrap:wrap}
+.m-v small{font-family:var(--body);font-size:13px;color:var(--muted);font-weight:500;letter-spacing:0}
+.m-s{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;min-height:20px}
+.meter{height:5px;border-radius:9px;background:var(--surface-2);flex:1;overflow:hidden}
+.meter i{display:block;height:100%;border-radius:9px;background:var(--accent)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12.5px;color:var(--fg)}
+.pill::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--pc,var(--good))}
+.arrow{display:inline-flex;transition:transform .5s}
+
+/* paneller */
+.panel{background:var(--surface);border-radius:22px;box-shadow:var(--shadow);padding:20px 22px;min-width:0}
+.p-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+h2{font-family:var(--display);font-weight:600;font-size:18px;letter-spacing:-.01em;margin:0;display:flex;align-items:center;gap:8px}
+h2 svg{color:var(--accent)}
+.seg{display:inline-flex;background:var(--surface-2);border-radius:999px;padding:3px}
+.seg button{border:0;background:none;border-radius:999px;padding:6px 14px;cursor:pointer;color:var(--muted);font-weight:500;font-size:13.5px}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 3px rgba(16,27,45,.14)}
+.chart{position:relative}
+.chart svg{display:block;width:100%;height:auto;touch-action:pan-y}
+.chart text{font-family:var(--body);font-size:11.5px;fill:var(--muted);font-variant-numeric:tabular-nums}
+.chart .val{fill:var(--fg);font-weight:600;font-size:12px}
+.tip{position:absolute;top:0;pointer-events:none;background:var(--fg);color:var(--bg);border-radius:10px;padding:6px 10px;font-size:12.5px;white-space:nowrap;transform:translateX(-50%)}
+.tip b{font-weight:600}
+.legend{display:flex;gap:14px;font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:3px;vertical-align:middle;margin-right:5px}
+
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+#sunArc svg{display:block;width:100%;max-width:420px;margin:0 auto;height:auto}
+#sunArc text{font-family:var(--body);font-size:11px;fill:var(--muted)}
+.rows{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.rows div{display:flex;flex-direction:column;gap:1px;min-width:0}
+.rows span{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px}
+.rows span svg{color:var(--sun);flex:none}
+.rows b{font-family:var(--display);font-weight:600;font-size:20px;letter-spacing:-.01em}
+.moon-main{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.moon-main svg{flex:none}
+.moon-name{font-family:var(--display);font-weight:600;font-size:24px;letter-spacing:-.015em;line-height:1.15}
+.moon-sub{color:var(--muted);font-size:14px;margin-top:3px}
+.phases{display:flex;justify-content:space-between;gap:4px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.phases div{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10.5px;color:var(--muted);text-align:center;flex:1;min-width:0;opacity:.55}
+.phases div.on{opacity:1;color:var(--fg);font-weight:600}
+.moon-dark{fill:var(--surface-2);stroke:var(--line)}
+.moon-lit{fill:var(--sun)}
+.phases .moon-lit{fill:var(--muted)} .phases .on .moon-lit{fill:var(--sun)}
+footer{color:var(--muted);font-size:12.5px;text-align:center;padding-top:4px}
+footer a{color:inherit}
+
+@media (max-width:900px){.metrics{grid-template-columns:repeat(3,1fr)}.duo{grid-template-columns:1fr}}
+@media (max-width:560px){
+  .wrap{padding-inline:16px}
+  .metrics{grid-template-columns:repeat(2,1fr)}
+  .hero{min-height:300px}.hero-txt{padding:22px;max-width:78%}
+  .pick{width:100%}.field{flex:1 1 130px}.field select,.field input{width:100%;max-width:none}
+  .rows b{font-size:17px}.chips{margin-left:0}
+  .phases div span{display:none}
+}
+@media (prefers-reduced-motion:reduce){.arrow{transition:none}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="bar">
+    <div class="brand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M18.7 5.3 17 7M7 17l-1.7 1.7"/></svg>HavaDuru</div>
+    <div class="pick">
+      <label class="field" title="Ülke"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>
+        <select id="country" aria-label="Ülke"></select></label>
+      <label class="field" title="Şehir"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.500C5 14.800 12 21 12 21z"/><circle cx="12" cy="9.500" r="2.500"/></svg>
+        <select id="city" aria-label="Şehir"></select></label>
+      <div class="field"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.500"/><path d="m16 16 4.500 4.500"/></svg>
+        <input id="q" type="search" placeholder="Şehir ara…" autocomplete="off" aria-label="Şehir ara">
+        <div class="results" id="results" hidden></div></div>
+    </div>
+  </header>
+
+  <div class="note" id="note" hidden>
+    <span><b>Örnek veri gösteriliyor.</b> Open-Meteo'ya ulaşılamadı; internet bağlantını kontrol edip sayfayı yenile.</span>
+    <div class="chips" id="chips" aria-label="Sahneyi dene"></div>
+  </div>
+
+  <section class="act" aria-live="polite">
+    <div class="act-ic" id="actIc"></div>
+    <div class="act-b"><div class="act-l">Bugün ne yapılır?</div><div class="act-t" id="actT">—</div><div class="act-s" id="actS"></div></div>
+  </section>
+
+  <section class="hero" aria-live="polite">
+    <canvas id="sky" aria-hidden="true"></canvas>
+    <div class="hero-txt">
+      <div><div class="place"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22s7.500-6.600 7.500-12.300A7.500 7.500 0 0 0 4.500 9.700C4.500 15.400 12 22 12 22zm0-9.300a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></svg><span id="place">—</span></div>
+        <div class="when" id="when">Yükleniyor…</div></div>
+      <div class="temp-row">
+        <div class="temp num"><span id="temp">–</span><sup>°C</sup></div>
+        <div class="cond"><strong id="cond">—</strong><span id="feels"></span></div>
+      </div>
+      <div class="hilo" id="hilo"></div>
+    </div>
+  </section>
+
+  <section class="metrics" id="metrics" aria-label="Anlık ölçümler"></section>
+
+  <section class="panel">
+    <div class="p-head">
+      <h2><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 5-8 4 5"/></svg>Sıcaklık değişimi</h2>
+      <div class="legend" id="legend" hidden><span><i style="background:var(--sun)"></i>En yüksek</span><span><i style="background:var(--accent)"></i>En düşük</span></div>
+      <div class="seg" role="group" aria-label="Aralık"><button id="mH" aria-pressed="true">24 saat</button><button id="mD" aria-pressed="false">7 gün</button></div>
+    </div>
+    <div class="chart" id="chart"></div>
+  </section>
+
+  <div class="duo">
+    <section class="panel sun">
+      <div class="p-head"><h2><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 18h18M6.500 18a5.500 5.500 0 0 1 11 0M12 6V3.500M5 9.500 3.500 8M19 9.500 20.500 8"/></svg>Güneş</h2><span class="when" id="sunState"></span></div>
+      <div id="sunArc"></div>
+      <div class="rows" id="sunRows"></div>
+    </section>
+    <section class="panel">
+      <div class="p-head"><h2><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 14.500A8.500 8.500 0 0 1 9.500 4a8.500 8.500 0 1 0 10.500 10.500z"/></svg>Ay evresi</h2></div>
+      <div class="moon-main" id="moonMain"></div>
+      <div class="phases" id="phases"></div>
+    </section>
+  </div>
+
+  <footer>Veri: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (ücretsiz, anahtarsız) · Ay evresi cihazda hesaplanır</footer>
+</div>
+
+<script>
+(()=>{
+const $=s=>document.querySelector(s);
+const PLACES=[
+ ["Türkiye","Europe/Istanbul",[["İstanbul",41.01,28.98],["Ankara",39.93,32.86],["İzmir",38.42,27.14],["Antalya",36.90,30.70],["Bursa",40.19,29.06],["Trabzon",41.00,39.72],["Diyarbakır",37.91,40.24],["Erzurum",39.90,41.27],
+  ["Adana",37.00,35.32],["Gaziantep",37.07,37.38],["Konya",37.87,32.48],["Kayseri",38.72,35.49],["Mersin",36.81,34.64],["Eskişehir",39.78,30.52],["Samsun",41.29,36.33],["Denizli",37.77,29.09],["Şanlıurfa",37.16,38.80],["Malatya",38.35,38.31],
+  ["Kahramanmaraş",37.58,36.93],["Van",38.49,43.38],["Sakarya",40.78,30.40],["Kocaeli",40.77,29.92],["Manisa",38.61,27.43],["Balıkesir",39.65,27.89],["Aydın",37.85,27.85],["Muğla",37.22,28.36],["Tekirdağ",40.98,27.51],["Hatay",36.20,36.16],
+  ["Mardin",37.31,40.74],["Sivas",39.75,37.02],["Elazığ",38.67,39.22],["Edirne",41.68,26.56],["Çanakkale",40.15,26.41],["Rize",41.02,40.52],["Ordu",40.98,37.88],["Kars",40.60,43.10],["Afyonkarahisar",38.76,30.54],["Zonguldak",41.45,31.79]]],
+ ["Almanya","Europe/Berlin",[["Berlin",52.52,13.40],["Münih",48.14,11.58],["Hamburg",53.55,9.99],["Frankfurt",50.11,8.68]]],
+ ["Birleşik Krallık","Europe/London",[["Londra",51.51,-0.13],["Manchester",53.48,-2.24],["Edinburgh",55.95,-3.19]]],
+ ["Fransa","Europe/Paris",[["Paris",48.86,2.35],["Lyon",45.76,4.84],["Marsilya",43.30,5.37]]],
+ ["İtalya","Europe/Rome",[["Roma",41.90,12.50],["Milano",45.46,9.19],["Napoli",40.85,14.27]]],
+ ["İspanya","Europe/Madrid",[["Madrid",40.42,-3.70],["Barselona",41.39,2.17],["Sevilla",37.39,-5.99]]],
+ ["Hollanda","Europe/Amsterdam",[["Amsterdam",52.37,4.90],["Rotterdam",51.92,4.48]]],
+ ["Azerbaycan","Asia/Baku",[["Bakü",40.41,49.87],["Gence",40.68,46.36]]],
+ ["Rusya","Europe/Moscow",[["Moskova",55.76,37.62],["St. Petersburg",59.93,30.34]]],
+ ["BAE","Asia/Dubai",[["Dubai",25.20,55.27],["Abu Dabi",24.45,54.38]]],
+ ["Mısır","Africa/Cairo",[["Kahire",30.04,31.24],["İskenderiye",31.20,29.92]]],
+ ["Japonya","Asia/Tokyo",[["Tokyo",35.68,139.69],["Osaka",34.69,135.50],["Sapporo",43.06,141.35]]],
+ ["Güney Kore","Asia/Seoul",[["Seul",37.57,126.98],["Busan",35.18,129.08]]],
+ ["ABD","America/New_York",[["New York",40.71,-74.01],["Miami",25.76,-80.19],["Chicago",41.88,-87.63,"America/Chicago"],["Los Angeles",34.05,-118.24,"America/Los_Angeles"]]],
+ ["Brezilya","America/Sao_Paulo",[["São Paulo",-23.55,-46.63],["Rio de Janeiro",-22.91,-43.17]]],
+ ["Avustralya","Australia/Sydney",[["Sidney",-33.87,151.21],["Melbourne",-37.81,144.96]]]
+];
+const ALL=[];PLACES.forEach(([c,tz,cs])=>cs.forEach(([n,lat,lon,t])=>ALL.push({name:n,country:c,lat,lon,tz:t||tz})));
+const S={live:null,city:null,data:null,mode:'h',demoKind:null};
+
+/* ---------- yardımcılar ---------- */
+const NAMES={0:'Açık',1:'Çoğunlukla açık',2:'Parçalı bulutlu',3:'Kapalı',45:'Sisli',48:'Kırağılı sis',51:'Hafif çisenti',53:'Çisenti',55:'Yoğun çisenti',56:'Dondurucu çisenti',57:'Dondurucu çisenti',61:'Hafif yağmur',63:'Yağmurlu',65:'Kuvvetli yağmur',66:'Dondurucu yağmur',67:'Dondurucu yağmur',71:'Hafif kar',73:'Kar yağışlı',75:'Yoğun kar',77:'Kar taneleri',80:'Hafif sağanak',81:'Sağanak yağışlı',82:'Şiddetli sağanak',85:'Kar sağanağı',86:'Kar sağanağı',95:'Gök gürültülü fırtına',96:'Dolulu fırtına',99:'Dolulu fırtına'};
+const kindOf=c=>c<=1?'clear':c===2?'partly':c===3?'cloudy':c<=48?'fog':(c>=71&&c<=77)||c===85||c===86?'snow':c>=95?'storm':'rain';
+const DAYS=['Paz','Pzt','Sal','Çar','Per','Cum','Cmt'],DAYL=['Pazar','Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'],MON=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+const hm=ms=>new Date(ms).toISOString().slice(11,16);
+const pIso=s=>Date.parse((s.length===10?s+'T00:00':s)+':00Z');
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const r0=v=>Math.round(v);
+function tzOff(tz){try{const p=new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric'}).formatToParts(new Date()).reduce((o,x)=>(o[x.type]=+x.value,o),{});return Math.round((Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute,p.second)-Date.now())/60000)}catch(e){return 0}}
+function rng(str){let h=1779033703;for(let i=0;i<str.length;i++){h=Math.imul(h^str.charCodeAt(i),3432918353);h=h<<13|h>>>19}return()=>{h=Math.imul(h^h>>>16,2246822507);h=Math.imul(h^h>>>13,3266489909);return((h^=h>>>16)>>>0)/4294967296}}
+const ic=(d,extra='')=>`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
+const CLOUD='M7 18h10a4 4 0 0 0 .6-7.960A5.500 5.500 0 0 0 7.100 9.100 4.500 4.500 0 0 0 7 18z';
+function wicon(kind,day,x,y,s){ // grafik içi küçük simge (SVG <g>)
+  const g=d=>`<g transform="translate(${x-s/2} ${y-s/2}) scale(${s/24})" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${d}</g>`;
+  const sun=`<circle cx="12" cy="12" r="4.300" fill="var(--sun)" stroke="none"/><path stroke="var(--sun)" d="M12 3v2M12 19v2M3 12h2M19 12h2M5.600 5.600 7 7M17 17l1.400 1.400M18.400 5.600 17 7M7 17l-1.400 1.400"/>`;
+  const moon=`<path fill="var(--muted)" stroke="none" d="M19 14.500A7.500 7.500 0 0 1 9.500 5 7.500 7.500 0 1 0 19 14.500z"/>`;
+  const cl=(dy=0)=>`<path transform="translate(0 ${dy})" stroke="var(--muted)" fill="var(--surface-2)" d="${CLOUD}"/>`;
+  if(kind==='clear')return g(day?sun:moon);
+  if(kind==='partly')return g((day?`<circle cx="16.500" cy="8" r="3.400" fill="var(--sun)" stroke="none"/>`:`<circle cx="17" cy="7.500" r="3" fill="var(--muted)" stroke="none"/>`)+cl(1));
+  if(kind==='cloudy')return g(cl());
+  if(kind==='fog')return g(`<path stroke="var(--muted)" d="M4 9h16M6 13h12M4 17h16"/>`);
+  if(kind==='rain')return g(cl(-3)+`<path stroke="var(--accent)" d="M9 18l-1 3M13 18l-1 3M17 18l-1 3"/>`);
+  if(kind==='snow')return g(cl(-3)+`<path stroke="var(--accent)" d="M9 19v.01M13 21v.01M17 19v.01" stroke-width="2.600"/>`);
+  return g(cl(-3)+`<path fill="var(--sun)" stroke="none" d="M13 14l-4 5h3l-1 4 4-5.500h-3z"/>`);
+}
+
+/* ---------- veri: canlı ---------- */
+async function getJSON(u){const c=new AbortController(),t=setTimeout(()=>c.abort(),7000);try{const r=await fetch(u,{signal:c.signal});if(!r.ok)throw new Error(r.status);return await r.json()}finally{clearTimeout(t)}}
+async function fetchLive(c){
+  const q=`latitude=${c.lat}&longitude=${c.lon}&timezone=auto`;
+  const f=getJSON(`https://api.open-meteo.com/v1/forecast?${q}&forecast_days=8&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure&hourly=temperature_2m,precipitation_probability,weather_code,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max`);
+  const a=getJSON(`https://air-quality-api.open-meteo.com/v1/air-quality?${q}&current=european_aqi,pm2_5,pm10`).catch(()=>null);
+  const [w,aq]=await Promise.all([f,a]);
+  const now=pIso(w.current.time),H=w.hourly,D=w.daily;
+  let i0=H.time.findIndex(t=>pIso(t)>now-3600e3);if(i0<0)i0=0;
+  return{now,cur:{t:w.current.temperature_2m,feels:w.current.apparent_temperature,code:w.current.weather_code,isDay:!!w.current.is_day,hum:w.current.relative_humidity_2m,wind:w.current.wind_speed_10m,wdir:w.current.wind_direction_10m,pres:w.current.surface_pressure},
+    aqi:aq&&aq.current&&aq.current.european_aqi!=null?{v:aq.current.european_aqi,pm25:aq.current.pm2_5,pm10:aq.current.pm10}:null,
+    hourly:H.time.slice(i0,i0+25).map((t,k)=>({t:pIso(t),temp:H.temperature_2m[i0+k],pop:H.precipitation_probability?H.precipitation_probability[i0+k]:null,code:H.weather_code[i0+k],day:!!H.is_day[i0+k]})),
+    daily:D.time.slice(0,7).map((t,k)=>({t:pIso(t),code:D.weather_code[k],max:D.temperature_2m_max[k],min:D.temperature_2m_min[k],sunrise:pIso(D.sunrise[k]),sunset:pIso(D.sunset[k]),uv:D.uv_index_max[k],pop:D.precipitation_probability_max?D.precipitation_probability_max[k]:null}))};
+}
+/* ---------- veri: örnek (API'ye ulaşılamazsa) ---------- */
+function sunTimes(dayMs,lat,lon,offMin){
+  const d=new Date(dayMs),doy=Math.floor((dayMs-Date.UTC(d.getUTCFullYear(),0,0))/864e5);
+  const dec=-23.44*Math.cos(2*Math.PI*(doy+10)/365)*Math.PI/180,la=lat*Math.PI/180;
+  const H=Math.acos(clamp(-Math.tan(la)*Math.tan(dec),-1,1))/Math.PI*12,noon=12+offMin/60-lon/15;
+  return[dayMs+(noon-H)*36e5,dayMs+(noon+H)*36e5];
+}
+function demo(c){
+  const off=c.tz?tzOff(c.tz):Math.round(c.lon/15)*60,now=Date.now()+off*6e4,day0=Math.floor(now/864e5)*864e5;
+  const R=rng(c.name+new Date(day0).toISOString().slice(0,10)),doy=(day0-Date.UTC(new Date(day0).getUTCFullYear(),0,0))/864e5;
+  const season=Math.cos(2*Math.PI*(doy-196)/365)*(c.lat>=0?1:-1),mean=28-.35*Math.abs(c.lat)+season*Math.min(1.3,Math.abs(c.lat)/40)*10;
+  const pool=[0,1,2,2,3,61,63,80,95,45];const pick=()=>{let k=pool[Math.floor(R()*pool.length)];if(mean<1&&k>=61&&k<95)k=73;return k};
+  const force={clear:0,partly:2,cloudy:3,fog:45,rain:63,snow:73,storm:95}[S.demoKind];
+  const dOff=[0];for(let i=1;i<8;i++)dOff.push(dOff[i-1]+(R()-.5)*3.2);
+  const tAt=ms=>{const h=(ms-day0)/36e5,di=clamp(Math.floor(h/24),0,6),fr=clamp(h/24-di,0,1);return mean+dOff[di]*(1-fr)+dOff[di+1]*fr+5.200*Math.cos((h%24-15)/24*2*Math.PI)};
+  const daily=[];for(let i=0;i<7;i++){const t=day0+i*864e5,[sr,ss]=sunTimes(t,c.lat,c.lon,off),code=i===0&&force!=null?force:pick();daily.push({t,code,max:mean+dOff[i]+5.200,min:mean+dOff[i]-5.200,sunrise:sr,sunset:ss,uv:clamp(7*Math.cos((c.lat-season*20)*Math.PI/180)+R()*1.500,0,11),pop:kindOf(code)==='rain'||kindOf(code)==='storm'||kindOf(code)==='snow'?55+R()*40:R()*25})}
+  const code=daily[0].code,h0=Math.floor(now/36e5)*36e5,hourly=[];
+  for(let i=0;i<25;i++){const t=h0+i*36e5,di=clamp(Math.floor((t-day0)/864e5),0,6);hourly.push({t,temp:tAt(t),pop:clamp(daily[di].pop+(R()-.5)*20,0,100),code:i<8?code:daily[di].code,day:t>daily[di].sunrise&&t<daily[di].sunset})}
+  const t=tAt(now),wind=6+R()*22+(kindOf(code)==='storm'?18:0),hum=clamp(45+R()*25+(['rain','storm','fog','snow'].includes(kindOf(code))?28:0),20,99);
+  return{now,cur:{t,feels:t-wind*.07+(hum-55)*.03,code,isDay:now>daily[0].sunrise&&now<daily[0].sunset,hum,wind,wdir:R()*360,pres:1004+R()*20},aqi:{v:14+R()*58,pm25:5+R()*20,pm10:10+R()*30},hourly,daily};
+}
+
+/* ---------- yükle & çiz ---------- */
+async function load(c){
+  S.city=c;try{localStorage.setItem('gk-city',JSON.stringify(c))}catch(e){}
+  $('#place').textContent=c.name+(c.country?', '+c.country:'');
+  let d=null;
+  if(S.live!==false){try{d=await fetchLive(c);S.live=true}catch(e){S.live=false}}
+  if(S.city!==c)return;
+  if(!d)d=demo(c);
+  S.data=d;$('#note').hidden=S.live!==false;render();
+}
+function render(){
+  const d=S.data,c=d.cur,dt=new Date(d.now),k=kindOf(c.code),today=d.daily[0];
+  $('#when').textContent=`${DAYL[dt.getUTCDay()]}, ${dt.getUTCDate()} ${MON[dt.getUTCMonth()]} · ${hm(d.now)}`;
+  $('#temp').textContent=r0(c.t);$('#cond').textContent=NAMES[c.code]||'—';
+  $('#feels').textContent=`Hissedilen ${r0(c.feels)}°`;
+  $('#hilo').innerHTML=`<span>${ic('<path d="M12 19V5M6 11l6-6 6 6"/>')}En yüksek <b class="num">${r0(today.max)}°</b></span><span>${ic('<path d="M12 5v14M6 13l6 6 6-6"/>')}En düşük <b class="num">${r0(today.min)}°</b></span>`;
+  renderAct(k,c.t,c.isDay);
+  setScene(k,c.isDay);renderMetrics();renderChart();renderSun();renderMoon();
+}
+/* ---------- aktivite önerisi ---------- */
+const AI={cup:'<path d="M5 9h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5zM16 10h1.500a2.500 2.500 0 0 1 0 5H16M8 3v2M12 3v2"/>',
+ ball:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3v18M5.600 5.600c3 3 3 9.800 0 12.800M18.400 5.600c-3 3-3 9.800 0 12.800"/>',
+ wave:'<path d="M3 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 13c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 18c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/>',
+ umb:'<path d="M3 12a9 9 0 0 1 18 0zM12 12v6a2 2 0 0 0 4 0M12 3v.01"/>',
+ walk:'<circle cx="13" cy="4.500" r="1.800"/><path d="M10 21l2-6-3-3 1.500-4.500 3.500 3 3 1M8 12l2-4.500M14 21l-1.500-5"/>',
+ star:'<path d="M12 3l2.600 5.600 6 .7-4.500 4.200 1.200 6L12 16.500l-5.300 3 1.200-6L3.400 9.300l6-.7z"/>',
+ film:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 5v14M16 5v14M3 10h5M3 14h5M16 10h5M16 14h5"/>',
+ ice:'<path d="M7 10a5 5 0 0 1 10 0zM7 10l5 11 5-11"/>',
+ home:'<path d="M4 11l8-7 8 7v9H4zM10 20v-6h4v6"/>'};
+function activity(k,t,day){
+  if(k==='storm')return['home','Dışarısı fırtınalı, bugün evde kalma günü','Battaniyeni al, pencereden şimşekleri izle; bir dizi maratonu da fena olmaz.'];
+  if(k==='snow')return['film','Sıcak çikolata eşliğinde film izleme havası','Önce dışarıda biraz kartopu, sonra battaniye altında film.'];
+  if(k==='rain')return t>=18?['umb','Şemsiyeni al, yağmurda kısa bir yürüyüşe çık','Sonrasında cam kenarında bir kahve çok iyi gider.']:['cup','Kahveni al, cam kenarında kitap okuma havası','Yağmur sesi eşliğinde müzik ya da film de güzel olur.'];
+  if(k==='fog')return['cup','Sisli bir gün; sıcak bir çay ve sakin bir mola','Dışarı çıkacaksan dikkatli ol, görüş mesafesi düşük.'];
+  if(t>=35)return['wave','Havuz, deniz veya okyanusa gir bence :)','Çok sıcak; bol su iç, öğle saatlerinde gölgede kal.'];
+  if(t>=30)return['ice','Dondurma ve gölgede serinleme zamanı','Sporu akşam serinliğine bırak, güneş kremini unutma.'];
+  if(!day&&k==='clear'&&t>=10)return['star','Gökyüzü açık, yıldızları izlemeye ne dersin?','Şehir ışıklarından biraz uzaklaşırsan daha da güzel görünür.'];
+  if(t>=25)return['ball','Basketbol oynamaya ne dersin?','Hava tam kıvamında; bisiklet ya da sahil yürüyüşü de olur.'];
+  if(t>=18)return['walk','Yürüyüş, bisiklet ya da piknik için harika bir hava','Parka çık, arkadaşlarını da çağır.'];
+  if(t>=10)return['walk','Hafif bir ceketle koşu ya da tempolu yürüyüş','Serin hava spor için ideal; dönüşte sıcak bir içecek.'];
+  if(t>=0)return['cup','Hava soğuk; müze, sinema ya da sıcak bir kafe','Dışarı çıkarken montunu ve atkını al.'];
+  return['home','Dondurucu soğuk, sıkı giyin','Evde sıcak bir çorba ve film en güvenli plan.'];
+}
+function renderAct(k,t,day){const [i,title,sub]=activity(k,t,day);$('#actIc').innerHTML=ic(AI[i]);$('#actT').textContent=title;$('#actS').textContent=sub}
+
+function renderMetrics(){
+  const d=S.data,c=d.cur,t=d.daily[0];
+  const dirs=['K','KD','D','GD','G','GB','B','KB'],dir=dirs[Math.round(c.wdir/45)%8];
+  const beau=c.wind<6?'Sakin':c.wind<20?'Hafif esinti':c.wind<39?'Orta şiddette':c.wind<62?'Kuvvetli':'Fırtına';
+  let aq='<div class="m-v num">—</div><div class="m-s">Veri yok</div>';
+  if(d.aqi){const v=d.aqi.v,[n,col]=v<=20?['İyi','var(--good)']:v<=40?['Makul','var(--good)']:v<=60?['Orta','var(--warn)']:v<=80?['Kötü','var(--bad)']:['Çok kötü','var(--bad)'];
+    aq=`<div class="m-v num">${r0(v)}<small>AQI</small></div><div class="m-s"><span class="pill" style="--pc:${col}">${n}</span>· PM2.5 ${r0(d.aqi.pm25)}</div>`}
+  const uv=t.uv,uvn=uv==null?'':uv<3?'Düşük':uv<6?'Orta':uv<8?'Yüksek':uv<11?'Çok yüksek':'Aşırı';
+  const pop=t.pop;
+  const M=(icon,l,body)=>`<div class="m"><div class="m-l">${ic(icon)}${l}</div>${body}</div>`;
+  $('#metrics').innerHTML=
+   M('<path d="M12 3s6 6.500 6 11a6 6 0 0 1-12 0c0-4.500 6-11 6-11z"/>','Nem',`<div class="m-v num">${r0(c.hum)}<small>%</small></div><div class="m-s"><span class="meter"><i style="width:${clamp(c.hum,0,100)}%"></i></span></div>`)+
+   M('<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h7"/>','Hava kalitesi',aq)+
+   M('<path d="M4 8h10a2.500 2.500 0 1 0-2.500-2.500M4 12h15M4 16h8a2.500 2.500 0 1 1-2.500 2.500"/>','Rüzgar',`<div class="m-v num">${r0(c.wind)}<small>km/sa</small></div><div class="m-s"><span class="arrow" style="transform:rotate(${c.wdir+180}deg)">${ic('<path d="M12 20V4M6 10l6-6 6 6"/>')}</span>${dir} · ${beau}</div>`)+
+   M('<circle cx="12" cy="13" r="8"/><path d="M12 13l3.500-4M12 3v2"/>','Basınç',`<div class="m-v num">${r0(c.pres)}<small>hPa</small></div><div class="m-s">${c.pres<1005?'Alçak basınç':c.pres>1020?'Yüksek basınç':'Normal'}</div>`)+
+   M('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.400 1.400M17.600 17.600 19 19M19 5l-1.400 1.400M6.400 17.600 5 19"/>','UV indeksi',`<div class="m-v num">${uv==null?'—':uv.toFixed(1)}</div><div class="m-s">${uvn}</div>`)+
+   M(`<path d="${CLOUD}" transform="translate(0 -4)"/><path d="M9 18l-1 3M13 18l-1 3M17 18l-1 3"/>`,'Yağış ihtimali',`<div class="m-v num">${pop==null?'—':r0(pop)}<small>%</small></div><div class="m-s"><span class="meter"><i style="width:${clamp(pop||0,0,100)}%"></i></span></div>`);
+}
+
+/* ---------- grafik ---------- */
+function renderChart(){
+  const el=$('#chart'),d=S.data;if(!d)return;
+  const W=Math.max(300,el.clientWidth),Hh=236,L=38,R=16,T=52,B=30,daily=S.mode==='d';
+  $('#legend').hidden=!daily;
+  const pts=daily?d.daily:d.hourly,n=pts.length;
+  const series=daily?[{k:'max',col:'var(--sun)'},{k:'min',col:'var(--accent)'}]:[{k:'temp',col:'var(--accent)'}];
+  const all=pts.flatMap(p=>series.map(s=>p[s.k]));let lo=Math.min(...all),hi=Math.max(...all);
+  const step=[1,2,5,10,20].find(s=>(hi-lo)/s<=4)||20;lo=Math.floor((lo-.5)/step)*step;hi=Math.ceil((hi+.5)/step)*step;
+  const X=i=>L+(W-L-R)*i/(n-1),Y=v=>T+(Hh-T-B)*(1-(v-lo)/(hi-lo));
+  const path=k=>{let s=`M${X(0)} ${Y(pts[0][k])}`;for(let i=0;i<n-1;i++){const p0=pts[Math.max(0,i-1)][k],p1=pts[i][k],p2=pts[i+1][k],p3=pts[Math.min(n-1,i+2)][k],dx=(X(1)-X(0))/3;s+=` C${X(i)+dx} ${Y(p1+(p2-p0)/6)} ${X(i+1)-dx} ${Y(p2-(p3-p1)/6)} ${X(i+1)} ${Y(p2)}`}return s};
+  const every=daily?1:(W<560?6:3);
+  let g='';for(let v=lo;v<=hi+1e-9;v+=step)g+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-dasharray="${v===lo?'0':'3 5'}"/><text x="${L-8}" y="${Y(v)+4}" text-anchor="end">${v}°</text>`;
+  let lab='';pts.forEach((p,i)=>{if(i%every)return;const anchor=i===0?'start':i===n-1?'end':'middle',x=X(i);
+    lab+=`<text x="${x}" y="${Hh-8}" text-anchor="${anchor}">${daily?(i===0?'Bugün':DAYS[new Date(p.t).getUTCDay()]):(i===0?'Şimdi':hm(p.t))}</text>`;
+    const top=daily?p.max:p.temp,ix=clamp(x,L+10,W-R-10);
+    lab+=wicon(kindOf(p.code),daily?true:p.day,ix,14,20)+`<text class="val" x="${ix}" y="40" text-anchor="middle">${r0(top)}°</text>`});
+  const main=series[0].k,area=`${path(main)} L${X(n-1)} ${Y(lo)} L${X(0)} ${Y(lo)}Z`;
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Sıcaklık grafiği"><defs><linearGradient id="ar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${series[0].col}" stop-opacity=".28"/><stop offset="1" stop-color="${series[0].col}" stop-opacity="0"/></linearGradient></defs>${g}
+   <path d="${area}" fill="url(#ar)" stroke="none"/>${series.map(s=>`<path d="${path(s.k)}" fill="none" stroke="${s.col}" stroke-width="2.600" stroke-linecap="round"/>`).join('')}
+   ${series.map(s=>`<circle cx="${X(0)}" cy="${Y(pts[0][s.k])}" r="4.500" fill="var(--surface)" stroke="${s.col}" stroke-width="2.600"/>`).join('')}
+   ${lab}<g id="hov" visibility="hidden"><line id="hl" y1="${T-4}" y2="${Hh-B}" stroke="var(--muted)" stroke-width="1"/>${series.map((s,i)=>`<circle id="hd${i}" r="5" fill="${s.col}" stroke="var(--surface)" stroke-width="2"/>`).join('')}</g>
+   <rect id="hit" x="${L}" y="${T-10}" width="${W-L-R}" height="${Hh-T-B+10}" fill="transparent"/></svg><div class="tip" id="tip" hidden></div>`;
+  const hit=el.querySelector('#hit'),hov=el.querySelector('#hov'),tip=el.querySelector('#tip');
+  const move=e=>{const r=el.getBoundingClientRect(),px=(e.clientX-r.left)*W/r.width,i=clamp(Math.round((px-L)/(W-L-R)*(n-1)),0,n-1),p=pts[i];
+    hov.setAttribute('visibility','visible');el.querySelector('#hl').setAttribute('x1',X(i));el.querySelector('#hl').setAttribute('x2',X(i));
+    series.forEach((s,j)=>{const c=el.querySelector('#hd'+j);c.setAttribute('cx',X(i));c.setAttribute('cy',Y(p[s.k]))});
+    tip.hidden=false;tip.style.left=clamp(X(i)*r.width/W,70,r.width-70)+'px';
+    tip.innerHTML=daily?`${DAYL[new Date(p.t).getUTCDay()]} · <b>${r0(p.max)}° / ${r0(p.min)}°</b>`+(p.pop!=null?` · yağış %${r0(p.pop)}`:''):`${hm(p.t)} · <b>${p.temp.toFixed(1)}°</b>`+(p.pop!=null?` · yağış %${r0(p.pop)}`:'')};
+  hit.addEventListener('pointermove',move);hit.addEventListener('pointerdown',move);
+  hit.addEventListener('pointerleave',()=>{hov.setAttribute('visibility','hidden');tip.hidden=true});
+}
+
+/* ---------- güneş ---------- */
+function renderSun(){
+  const d=S.data,t=d.daily[0],sr=t.sunrise,ss=t.sunset,f=clamp((d.now-sr)/(ss-sr),0,1),up=d.now>sr&&d.now<ss;
+  const cx=160,cy=132,r=120,a=Math.PI*(1-f),x=cx+r*Math.cos(a),y=cy-r*Math.sin(a),len=ss-sr;
+  const dur=ms=>`${Math.floor(ms/36e5)} sa ${Math.round(ms%36e5/6e4)} dk`;
+  $('#sunState').textContent=up?`Batışa ${dur(ss-d.now)}`:d.now<sr?`Doğuşa ${dur(sr-d.now)}`:'Güneş battı';
+  $('#sunArc').innerHTML=`<svg viewBox="0 0 320 162" role="img" aria-label="Güneşin gökyüzündeki konumu"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--sun)" stop-opacity=".22"/><stop offset="1" stop-color="var(--sun)" stop-opacity="0"/></linearGradient></defs>
+   <path d="M${cx-r} ${cy} A${r} ${r} 0 0 1 ${cx+r} ${cy}" fill="none" stroke="var(--line)" stroke-width="2" stroke-dasharray="2 7" stroke-linecap="round"/>
+   ${f>0?`<path d="M${cx-r} ${cy} A${r} ${r} 0 0 1 ${x} ${y} L${x} ${cy}Z" fill="url(#sg)" stroke="none"/><path d="M${cx-r} ${cy} A${r} ${r} 0 0 1 ${x} ${y}" fill="none" stroke="var(--sun)" stroke-width="3" stroke-linecap="round"/>`:''}
+   <line x1="16" x2="304" y1="${cy}" y2="${cy}" stroke="var(--line)" stroke-width="1.500"/>
+   <circle cx="${cx-r}" cy="${cy}" r="3.500" fill="var(--muted)"/><circle cx="${cx+r}" cy="${cy}" r="3.500" fill="var(--muted)"/>
+   ${up?`<circle cx="${x}" cy="${y}" r="15" fill="var(--sun)" opacity=".22"/><circle cx="${x}" cy="${y}" r="8.500" fill="var(--sun)"/>`:''}
+   <text x="${cx-r}" y="${cy+18}" text-anchor="middle">${hm(sr)}</text><text x="${cx+r}" y="${cy+18}" text-anchor="middle">${hm(ss)}</text><text x="${cx}" y="${cy+18}" text-anchor="middle">ufuk</text></svg>`;
+  const up_i='<path d="M3 19h18M7 19a5 5 0 0 1 10 0M12 9V3M9 6l3-3 3 3"/>',dn_i='<path d="M3 19h18M7 19a5 5 0 0 1 10 0M12 3v6M9 6l3 3 3-3"/>',cl_i='<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>';
+  $('#sunRows').innerHTML=`<div><span>${ic(up_i)}Gün doğumu</span><b class="num">${hm(sr)}</b></div><div><span>${ic(dn_i)}Gün batımı</span><b class="num">${hm(ss)}</b></div><div><span>${ic(cl_i)}Gün uzunluğu</span><b class="num">${dur(len)}</b></div>`;
+}
+
+/* ---------- ay ---------- */
+const SYN=29.530588853;
+function moonSvg(p,size,cls=''){
+  const r=size/2-1.500,c=size/2,rx=Math.abs(Math.cos(2*Math.PI*p))*r,wax=p<.5,crescent=p<.25||p>.75;
+  const lit=p<.012||p>.988?'':Math.abs(p-.5)<.012?`<circle cx="${c}" cy="${c}" r="${r}" class="moon-lit"/>`:
+   `<path class="moon-lit" d="M${c} ${c-r} A${r} ${r} 0 0 ${wax?1:0} ${c} ${c+r} A${rx} ${r} 0 0 ${(wax?crescent:!crescent)?0:1} ${c} ${c-r}Z"/>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="${cls}" aria-hidden="true"><circle cx="${c}" cy="${c}" r="${r}" class="moon-dark" stroke-width="1"/>${lit}</svg>`;
+}
+function renderMoon(){
+  const age=(((Date.now()-Date.UTC(2000,0,6,18,14))/864e5)%SYN+SYN)%SYN,p=age/SYN,ill=(1-Math.cos(2*Math.PI*p))/2;
+  const N=['Yeni Ay','Büyüyen Hilal','İlk Dördün','Büyüyen Şişkin Ay','Dolunay','Küçülen Şişkin Ay','Son Dördün','Küçülen Hilal'],idx=Math.round(p*8)%8;
+  const off=S.data.now-Date.now(),fmt=days=>{const t=new Date(Date.now()+off+days*864e5);return `${t.getUTCDate()} ${MON[t.getUTCMonth()]}`};
+  const toFull=((.5-p+1)%1)*SYN,toNew=(1-p)*SYN;
+  $('#moonMain').innerHTML=moonSvg(p,104)+`<div style="min-width:0;flex:1"><div class="moon-name">${N[idx]}</div><div class="moon-sub">%${Math.round(ill*100)} aydınlık · ${age.toFixed(1)} günlük</div>
+   <div class="rows" style="grid-template-columns:1fr 1fr;margin-top:12px"><div><span>Sonraki dolunay</span><b class="num">${fmt(toFull)}</b></div><div><span>Sonraki yeni ay</span><b class="num">${fmt(toNew)}</b></div></div></div>`;
+  const short=['Yeni','Hilal','İlk D.','Şişkin','Dolunay','Şişkin','Son D.','Hilal'];
+  $('#phases').innerHTML=short.map((s,i)=>`<div class="${i===idx?'on':''}">${moonSvg(i/8,26)}<span>${s}</span></div>`).join('');
+}
+
+/* ---------- gökyüzü sahnesi (canvas) ---------- */
+const cv=$('#sky'),cx=cv.getContext('2d'),SC={kind:'clear',day:true,clouds:[],drops:[],stars:[],flash:0,next:1.500,bolt:null,t:0};
+const still=matchMedia('(prefers-reduced-motion:reduce)').matches;
+const SKY={day:{clear:['#2F86FF','#A5D2FF'],partly:['#4990EA','#BAD8F6'],cloudy:['#7A8BA3','#BCC6D3'],fog:['#98A2AE','#CDD2D9'],rain:['#44556E','#8696AD'],snow:['#8CA1BC','#D8E0EB'],storm:['#1E2638','#525E7A']},
+ night:{clear:['#060A1E','#1C2C5A'],partly:['#090F26','#27365F'],cloudy:['#141A2A','#363F55'],fog:['#1D232F','#474E5C'],rain:['#0D1321','#2C3752'],snow:['#19213A','#4C5976'],storm:['#07090F','#272D44']}};
+let W=0,H=0;
+function size(){const r=cv.getBoundingClientRect(),dp=Math.min(2,devicePixelRatio||1);W=r.width;H=r.height;cv.width=W*dp;cv.height=H*dp;cx.setTransform(dp,0,0,dp,0,0)}
+function setScene(kind,day){
+  const R=rng(kind+day);SC.kind=kind;SC.day=day;SC.flash=0;SC.next=1;SC.bolt=null;
+  const nC={clear:1,partly:4,cloudy:8,fog:5,rain:8,snow:7,storm:9}[kind];
+  SC.clouds=Array.from({length:nC},(_, i)=>({x:.3+R()*.8,y:.08+R()*(kind==='partly'?.3:.42),s:.6+R()*.8,v:.004+R()*.008,a:kind==='clear'?.35:.55+R()*.4,seed:i}));
+  const nD=kind==='rain'?110:kind==='storm'?150:kind==='snow'?90:0;
+  SC.drops=Array.from({length:nD},()=>({x:R(),y:R(),l:.6+R()*.8,v:.7+R()*.6,ph:R()*6.280}));
+  SC.stars=Array.from({length:70},()=>({x:R(),y:R()*.8,r:.4+R()*1.200,ph:R()*6.280}));
+  if(still)frame(0,true);
+}
+function cloud(x,y,s,col){cx.fillStyle=col;cx.beginPath();[[0,0,34],[-38,10,24],[36,8,27],[-14,-16,25],[18,-20,22],[-64,18,15],[64,17,16]].forEach(([dx,dy,r])=>{cx.moveTo(x+dx*s+r*s,y+dy*s);cx.arc(x+dx*s,y+dy*s,r*s,0,6.290)});cx.rect(x-64*s,y+10*s,128*s,23*s);cx.fill()}
+function mkBolt(){const pts=[],x0=W*(.52+Math.random()*.4);let x=x0,y=H*.3;pts.push([x,y]);while(y<H*.98){y+=H*(.05+Math.random()*.08);x+=(Math.random()-.45)*W*.05;pts.push([x,y])}return pts}
+let last=0;
+function frame(ts,once){
+  const dt=Math.min(.05,(ts-last)/1000||0);last=ts;SC.t+=dt;
+  if(!W||!H){size()}
+  const k=SC.kind,d=SC.day,col=SKY[d?'day':'night'][k],g=cx.createLinearGradient(0,0,0,H);g.addColorStop(0,col[0]);g.addColorStop(1,col[1]);cx.fillStyle=g;cx.fillRect(0,0,W,H);
+  const sx=W*.8,sy=H*.3,sr=Math.min(H*.17,70);
+  if(!d&&(k==='clear'||k==='partly')){SC.stars.forEach(s=>{cx.globalAlpha=.35+.5*Math.abs(Math.sin(SC.t*.8+s.ph));cx.fillStyle='#fff';cx.beginPath();cx.arc(s.x*W,s.y*H,s.r,0,6.290);cx.fill()});cx.globalAlpha=1}
+  if(k==='clear'||k==='partly'){
+    const pul=1+.04*Math.sin(SC.t*1.200),gl=cx.createRadialGradient(sx,sy,sr*.3,sx,sy,sr*3.200*pul);
+    if(d){gl.addColorStop(0,'rgba(255,236,170,.95)');gl.addColorStop(.25,'rgba(255,214,110,.45)');gl.addColorStop(1,'rgba(255,214,110,0)')}else{gl.addColorStop(0,'rgba(220,230,255,.5)');gl.addColorStop(1,'rgba(220,230,255,0)')}
+    cx.fillStyle=gl;cx.fillRect(0,0,W,H);
+    cx.fillStyle=d?'#FFD766':'#EEF2FF';cx.beginPath();cx.arc(sx,sy,sr,0,6.290);cx.fill();
+    if(d){cx.fillStyle='#FFF3C4';cx.beginPath();cx.arc(sx,sy,sr*.72,0,6.290);cx.fill()}
+    else{cx.fillStyle=col[0];cx.beginPath();cx.arc(sx+sr*.42,sy-sr*.22,sr*.86,0,6.290);cx.fill()}
+  }
+  const dark=k==='rain'||k==='storm';
+  SC.clouds.forEach(c=>{c.x+=c.v*dt;if(c.x>1.250)c.x=.15;
+    const a=c.a*(d?1:.6),tone=dark?(d?`rgba(70,82,104,${a})`:`rgba(40,48,68,${a})`):d?`rgba(255,255,255,${a})`:`rgba(150,165,198,${a})`;
+    cloud(c.x*W,c.y*H,c.s*Math.max(.7,H/330),tone)});
+  if(k==='fog'){for(let i=0;i<6;i++){const y=H*(.2+i*.14),o=Math.sin(SC.t*.25+i)*W*.05;const fg=cx.createLinearGradient(0,y,0,y+H*.12);const c1=d?'235,238,243':'150,158,172';fg.addColorStop(0,`rgba(${c1},0)`);fg.addColorStop(.5,`rgba(${c1},.5)`);fg.addColorStop(1,`rgba(${c1},0)`);cx.fillStyle=fg;cx.fillRect(o-W*.1,y,W*1.200,H*.12)}}
+  if(k==='rain'||k==='storm'){cx.strokeStyle='rgba(205,225,255,.6)';cx.lineWidth=1.300;cx.lineCap='round';cx.beginPath();const sp=k==='storm'?1.500:1.100;
+    SC.drops.forEach(p=>{p.y+=p.v*sp*dt;p.x-=p.v*sp*dt*.14;if(p.y>1.050){p.y=-.05;p.x=Math.random()*1.100}const x=p.x*W,y=p.y*H,l=p.l*16;cx.moveTo(x,y);cx.lineTo(x-l*.22,y+l)});cx.stroke()}
+  if(k==='snow'){cx.fillStyle='rgba(255,255,255,.9)';SC.drops.forEach(p=>{p.y+=p.v*.11*dt;if(p.y>1.050){p.y=-.05;p.x=Math.random()}cx.beginPath();cx.arc((p.x+Math.sin(SC.t*.8+p.ph)*.012)*W,p.y*H,1.200+p.l*1.600,0,6.290);cx.fill()})}
+  if(k==='storm'){
+    SC.next-=dt;if(SC.next<=0||once){SC.flash=1;SC.bolt=mkBolt();SC.next=2.200+Math.random()*3.500}
+    if(SC.flash>0){if(SC.bolt&&SC.flash>.35){cx.save();cx.shadowColor='#BFD4FF';cx.shadowBlur=22;cx.strokeStyle='#FFFFFF';cx.lineWidth=2.600;cx.lineJoin='round';cx.beginPath();SC.bolt.forEach(([x,y],i)=>i?cx.lineTo(x,y):cx.moveTo(x,y));cx.stroke();cx.restore()}
+      cx.fillStyle=`rgba(225,235,255,${SC.flash*.3})`;cx.fillRect(0,0,W,H);SC.flash-=dt*(once?0:2.400)}
+  }
+  if(!still&&!once)requestAnimationFrame(frame);
+}
+
+/* ---------- arayüz ---------- */
+const cSel=$('#country'),ciSel=$('#city');
+PLACES.forEach(([c],i)=>cSel.add(new Option(c,i)));
+function fillCities(i,pick){ciSel.length=0;PLACES[i][2].map(x=>x[0]).sort((a,b)=>a.localeCompare(b,'tr')).forEach(n=>ciSel.add(new Option(n,n)));if(pick)ciSel.value=pick}
+function sync(c){const i=PLACES.findIndex(p=>p[0]===c.country&&p[2].some(x=>x[0]===c.name));if(i>=0){cSel.value=i;fillCities(i,c.name)}else{if(!cSel.querySelector('[value="x"]'))cSel.add(new Option('Arama sonucu','x'),0);cSel.options[0].text=c.country||'Arama sonucu';cSel.value='x';ciSel.length=0;ciSel.add(new Option(c.name,c.name))}}
+cSel.addEventListener('change',()=>{if(cSel.value==='x')return;const i=+cSel.value;go(ALL.find(a=>a.country===PLACES[i][0]))});
+ciSel.addEventListener('change',()=>{const c=ALL.find(a=>a.name===ciSel.value&&a.country===PLACES[+cSel.value]?.[0]);if(c)go(c)});
+function go(c){S.demoKind=null;chipState();sync(c);load(c)}
+const q=$('#q'),res=$('#results');let deb;
+function showRes(list){res.textContent='';if(!list.length){const n=document.createElement('div');n.className='none';n.textContent='Sonuç bulunamadı';res.append(n)}
+  list.forEach(c=>{const b=document.createElement('button');b.type='button';b.textContent=c.name;const s=document.createElement('small');s.textContent=[c.admin,c.country].filter(Boolean).join(', ');b.append(s);b.addEventListener('click',()=>{res.hidden=true;q.value='';go(c)});res.append(b)});res.hidden=false}
+q.addEventListener('input',()=>{clearTimeout(deb);const v=q.value.trim();if(v.length<2){res.hidden=true;return}
+  deb=setTimeout(async()=>{const local=()=>ALL.filter(a=>a.name.toLocaleLowerCase('tr').includes(v.toLocaleLowerCase('tr'))).slice(0,6);
+    if(S.live===false)return showRes(local());
+    try{const j=await getJSON(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(v)}&count=6&language=tr&format=json`);if(q.value.trim()!==v)return;
+      showRes((j.results||[]).map(r=>({name:r.name,country:r.country||'',admin:r.admin1||'',lat:r.latitude,lon:r.longitude,tz:r.timezone})))}catch(e){showRes(local())}},280)});
+document.addEventListener('click',e=>{if(!e.target.closest('.field'))res.hidden=true});
+q.addEventListener('keydown',e=>{if(e.key==='Escape')res.hidden=true;if(e.key==='Enter'){const b=res.querySelector('button');if(b&&!res.hidden)b.click()}});
+const KN={clear:'Açık',partly:'Parçalı',cloudy:'Kapalı',rain:'Yağmur',storm:'Fırtına',snow:'Kar',fog:'Sis'};
+Object.entries(KN).forEach(([k,n])=>{const b=document.createElement('button');b.className='chip';b.type='button';b.textContent=n;b.dataset.k=k;b.addEventListener('click',()=>{S.demoKind=S.demoKind===k?null:k;chipState();S.data=demo(S.city);render()});$('#chips').append(b)});
+function chipState(){document.querySelectorAll('.chip').forEach(b=>b.setAttribute('aria-pressed',b.dataset.k===S.demoKind))}
+chipState();
+$('#mH').addEventListener('click',()=>setMode('h'));$('#mD').addEventListener('click',()=>setMode('d'));
+function setMode(m){S.mode=m;$('#mH').setAttribute('aria-pressed',m==='h');$('#mD').setAttribute('aria-pressed',m==='d');renderChart()}
+let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{size();renderChart();if(still)frame(0,true)},120)});
+setInterval(()=>{if(S.city&&S.live)load(S.city)},10*60*1000);
+
+let start=ALL[0];try{const s=JSON.parse(localStorage.getItem('gk-city'));if(s&&typeof s.lat==='number')start=s}catch(e){}
+size();sync(start);load(start);if(!still)requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
